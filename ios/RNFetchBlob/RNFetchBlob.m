@@ -345,76 +345,73 @@ RCT_EXPORT_METHOD(ls:(NSString *)path resolver:(RCTPromiseResolveBlock)resolve r
 #pragma mark - fs.stat
 RCT_EXPORT_METHOD(stat:(NSString *)target callback:(RCTResponseSenderBlock) callback)
 {
-
     [RNFetchBlobFS getPathFromUri:target completionHandler:^(NSString *path, ALAssetRepresentation *asset) {
-        __block NSMutableArray * result;
-        if(path != nil)
-        {
-            NSFileManager* fm = [NSFileManager defaultManager];
-            BOOL exist = nil;
-            BOOL isDir = nil;
-            NSError * error = nil;
-
-            exist = [fm fileExistsAtPath:path isDirectory:&isDir];
-            if(exist == NO) {
-                callback(@[[NSString stringWithFormat:@"failed to stat path `%@` because it does not exist or it is not a folder", path]]);
-                return ;
-            }
-            result = [RNFetchBlobFS stat:path error:&error];
-
-            if(error == nil)
-                callback(@[[NSNull null], result]);
-            else
+        if (path != nil) {
+            NSError *error = nil;
+            NSDictionary<NSString *, id> *result = [RNFetchBlobFS stat:path error:&error];
+            if (error != nil) {
                 callback(@[[error localizedDescription], [NSNull null]]);
-
-        }
-        else if(asset != nil)
-        {
-            __block NSNumber * size = [NSNumber numberWithLong:[asset size]];
-            result = [asset metadata];
-            [result setValue:size forKey:@"size"];
-            callback(@[[NSNull null], result]);
-        }
-        else
-        {
+            } else {
+                callback(@[[NSNull null], result]);
+            }
+        } else if (asset != nil) {
+            NSNumber *size = [NSNumber numberWithLong:[asset size]];
+            NSDictionary *metadata = [asset metadata];
+            if (metadata == nil) {
+                // Failed to get metadata on ALAssetRepresentation
+                callback(@[[NSString stringWithFormat:@"failed to stat path %@", target], [NSNull null]]);
+            } else {
+                NSMutableDictionary *result = [metadata mutableCopy];
+                [result setObject:size forKey:@"size"];
+                callback(@[[NSNull null], [NSDictionary dictionaryWithDictionary:result]]);
+            }
+        } else {
             callback(@[@"failed to stat path, could not resolve URI", [NSNull null]]);
         }
     }];
 }
 
 #pragma mark - fs.lstat
-RCT_EXPORT_METHOD(lstat:(NSString *)path callback:(RCTResponseSenderBlock) callback)
+RCT_EXPORT_METHOD(lstat:(NSString *)p callback:(RCTResponseSenderBlock)callback)
 {
-    NSFileManager* fm = [NSFileManager defaultManager];
-    BOOL exist = nil;
-    BOOL isDir = nil;
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    
+    NSString *path = [RNFetchBlobFS getPathOfAsset:p];
+    BOOL isDir = NO;
+    [fileManager fileExistsAtPath:path isDirectory:&isDir]; // Check if path is directory
+    
+    NSMutableArray<NSDictionary<NSString *, id> *> *results = [[NSMutableArray alloc] init];
+    NSError *error = nil;
 
-    path = [RNFetchBlobFS getPathOfAsset:path];
-
-    exist = [fm fileExistsAtPath:path isDirectory:&isDir];
-    if(exist == NO) {
-        callback(@[[NSString stringWithFormat:@"failed to lstat path `%@` because it does not exist or it is not a folder", path]]);
-        return ;
-    }
-    NSError * error = nil;
-    NSArray * files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:path error:&error];
-
-    NSMutableArray * res = [[NSMutableArray alloc] init];
-    if(isDir == YES) {
-        for(NSString * p in files) {
-            NSString * filePath = [NSString stringWithFormat:@"%@/%@", path, p];
-            [res addObject:[RNFetchBlobFS stat:filePath error:&error]];
+    if (isDir) {
+        NSDirectoryEnumerator<NSString *> *enumerator = [fileManager enumeratorAtPath:path];
+        if (enumerator == nil) {
+            NSString *localizedDescription = [NSString stringWithFormat:@"File Manager Error – Directory read error (reason unknown): %@", path];
+            NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: localizedDescription };
+            error = [NSError errorWithDomain:NSCocoaErrorDomain
+                                        code:NSFileReadUnknownError
+                                    userInfo:userInfo];
+        } else {
+            for (NSString *filePath in enumerator) {
+                NSError *e = nil;
+                NSDictionary<NSString *, id> *stat = [RNFetchBlobFS stat:[NSString stringWithFormat:@"%@/%@", path, filePath] error:&e];
+                if (e == nil && stat != nil) {
+                    [results addObject:stat];
+                }
+            }
+        }
+    } else {
+        NSDictionary<NSString *, id> *stat = [RNFetchBlobFS stat:path error:&error];
+        if (error == nil && stat != nil) {
+            [results addObject:stat];
         }
     }
-    else {
-        [res addObject:[RNFetchBlobFS stat:path error:&error]];
-    }
-
-    if(error == nil)
-        callback(@[[NSNull null], res == nil ? [NSNull null] :res ]);
-    else
+    
+    if (error != nil) {
         callback(@[[error localizedDescription], [NSNull null]]);
-
+    } else {
+        callback(@[[NSNull null], [NSArray arrayWithArray:results]]);
+    }
 }
 
 #pragma mark - fs.cp

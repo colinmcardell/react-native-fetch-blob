@@ -78,16 +78,16 @@ NSMutableDictionary *fileStreams = nil;
     [fileStreams setValue:instance forKey:uuid];
 }
 
-+(NSString *) getPathOfAsset:(NSString *)assetURI
++ (NSString *)getPathOfAsset:(NSString *)assetURI
 {
+    NSString *path = [assetURI copy];
     // get file path of an app asset
-    if([assetURI hasPrefix:ASSET_PREFIX])
-    {
-        assetURI = [assetURI stringByReplacingOccurrencesOfString:ASSET_PREFIX withString:@""];
-        assetURI = [[NSBundle mainBundle] pathForResource: [assetURI stringByDeletingPathExtension]
-                                                   ofType: [assetURI pathExtension]];
+    if ([path hasPrefix:ASSET_PREFIX]) {
+        path = [path stringByReplacingOccurrencesOfString:ASSET_PREFIX withString:@""];
+        path = [[NSBundle mainBundle] pathForResource:[path stringByDeletingPathExtension]
+                                               ofType:[path pathExtension]];
     }
-    return assetURI;
+    return path;
 }
 
 #pragma mark - system directories
@@ -635,27 +635,32 @@ NSMutableDictionary *fileStreams = nil;
 
 # pragma mark - stat
 
-+ (NSDictionary *) stat:(NSString *) path error:(NSError **) error {
-
-
-    BOOL isDir = NO;
-    NSFileManager * fm = [NSFileManager defaultManager];
-    if([fm fileExistsAtPath:path isDirectory:&isDir] == NO) {
++ (nullable NSDictionary<NSString *, id> *)stat:(NSString *)path error:(out NSError **)error
+{
+    NSError *e = nil;
+    NSDictionary<NSFileAttributeKey, id> *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:&e];
+    if (e != nil) {
+        *error = e;
         return nil;
     }
-    NSDictionary * info = [fm attributesOfItemAtPath:path error:&error];
-    NSString * size = [NSString stringWithFormat:@"%d", [info fileSize]];
-    NSString * filename = [path lastPathComponent];
-    NSDate * lastModified;
-    [[NSURL fileURLWithPath:path] getResourceValue:&lastModified forKey:NSURLContentModificationDateKey error:&error];
-    return @{
-             @"size" : size,
-             @"filename" : filename,
-             @"path" : path,
-             @"lastModified" : [NSNumber numberWithLong:(time_t) [lastModified timeIntervalSince1970]*1000],
-             @"type" : isDir ? @"directory" : @"file"
-            };
-
+    
+    NSMutableDictionary *stat = [[NSMutableDictionary alloc] init];
+    
+    // size
+    [stat setObject:[NSString stringWithFormat:@"%llu", [attributes fileSize]] forKey:@"size"];
+    // filename
+    [stat setObject:[path lastPathComponent] forKey:@"filename"];
+    // path
+    [stat setObject:path forKey:@"path"];
+    // lastModified
+    NSDate *lastModified = [attributes fileModificationDate];
+    if (lastModified != nil) {
+        [stat setObject:[NSNumber numberWithLong:[lastModified timeIntervalSince1970] * 1000] forKey:@"lastModified"];
+    }
+    // type
+    [stat setObject:[attributes.fileType isEqualToString:NSFileTypeDirectory] ? @"directory" : @"file" forKey:@"type"];
+    
+    return [NSDictionary dictionaryWithDictionary:stat];
 }
 
 # pragma mark - exists
